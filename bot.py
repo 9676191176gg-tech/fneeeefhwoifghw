@@ -1,3 +1,4 @@
+
 import logging
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -5,35 +6,35 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
-
+ 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8923862657:AAHdeOhKabUxww8Yn-x1L3-REJz5yyimdW4")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "1211960244")
-
+ 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+ 
 # ── STATES ──
 MAIN_MENU, CHOOSE_SERVICE, ENTER_NAME, ENTER_PHONE, ENTER_CAR, ENTER_COMMENT, CONFIRM = range(7)
-
+ 
 # ── PHOTOS (file_id кешируется после первой отправки) ──
 PHOTO_CACHE = {}
-
+ 
 PHOTO_PATHS = {
-    "WELCOME":  "images/welcome.jpg",
-    "SERVICES": "images/services.jpg",
-    "PRICES":   "images/prices.jpg",
-    "ABOUT":    "images/about.jpg",
-    "ADDRESS":  "images/address.jpg",
-    "CONTACT":  "images/contact.jpg",
-    "SUCCESS":  "images/success.jpg",
-    "CONFIRM":  "images/confirm.jpg",
+    "WELCOME":  "welcome.jpg",
+    "SERVICES": "services.jpg",
+    "PRICES":   "prices.jpg",
+    "ABOUT":    "about.jpg",
+    "ADDRESS":  "address.jpg",
+    "CONTACT":  "contact.jpg",
+    "SUCCESS":  "success.jpg",
+    "CONFIRM":  "confirm.jpg",
 }
-
+ 
 async def send_photo_text(update, ctx, photo_key, text, reply_markup=None):
     """Отправить фото + текст. Использует кеш file_id для скорости."""
     chat_id = update.effective_chat.id
     path = PHOTO_PATHS.get(photo_key)
-
+ 
     if photo_key in PHOTO_CACHE:
         msg = await ctx.bot.send_photo(
             chat_id=chat_id,
@@ -59,14 +60,14 @@ async def send_photo_text(update, ctx, photo_key, text, reply_markup=None):
         else:
             await ctx.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=reply_markup)
         return
-
+ 
     # Удалить предыдущее сообщение если это callback
     if update.callback_query:
         try:
             await update.callback_query.delete_message()
         except:
             pass
-
+ 
 # ── SERVICES ──
 SERVICES = [
     "🔆 Полировка",
@@ -83,20 +84,20 @@ SERVICES = [
     "🌑 Притемнение оптики / бронирование",
     "🪟 Тонировка",
 ]
-
+ 
 PRICES = """
 💰 *ПРАЙС-ЛИСТ*
-
+ 
 *Бронирование полиуретаном (PPF):*
 ├ Купе / Седан / Универсал / Кроссовер — *119 990 ₽*
 ├ Бизнес-класс / Джип — *159 990 ₽*
 └ Минивэн — *179 990 ₽*
-
+ 
 *Зоны риска:*
 ├ Купе / Седан / Универсал — *39 990 ₽*
 ├ Бизнес-класс / Кроссовер / Джип — *59 990 ₽*
 └ Минивэн — *39 990 ₽*
-
+ 
 *Дополнительные услуги:*
 ├ Полировка — *от 3 990 ₽*
 ├ Керамика — *от 7 990 ₽*
@@ -107,10 +108,10 @@ PRICES = """
 ├ Антихром — *от 2 990 ₽*
 ├ Оклейка в винил — *от 25 990 ₽*
 └ Подсветка салона — *от 3 990 ₽*
-
+ 
 _Точная стоимость после осмотра_
 """
-
+ 
 # ── KEYBOARDS ──
 def main_kb():
     return InlineKeyboardMarkup([
@@ -120,22 +121,22 @@ def main_kb():
         [InlineKeyboardButton("📍 Адрес и время работы", callback_data="address")],
         [InlineKeyboardButton("📞 Связаться с мастером", callback_data="contact")],
     ])
-
+ 
 def services_kb():
     btns = [[InlineKeyboardButton(s, callback_data=f"svc_{i}")] for i, s in enumerate(SERVICES)]
     btns.append([InlineKeyboardButton("◀️ Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(btns)
-
+ 
 def confirm_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_yes")],
         [InlineKeyboardButton("✏️ Изменить", callback_data="confirm_edit")],
         [InlineKeyboardButton("❌ Отмена", callback_data="confirm_cancel")],
     ])
-
+ 
 def back_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Главное меню", callback_data="back_main")]])
-
+ 
 # ── HANDLERS ──
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data.clear()
@@ -147,25 +148,25 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     await send_photo_text(update, ctx, "WELCOME", text, main_kb())
     return MAIN_MENU
-
+ 
 async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     data = q.data
-
+ 
     if data == "back_main":
         return await start(update, ctx)
-
+ 
     elif data == "book":
         await send_photo_text(update, ctx, "SERVICES",
             "🔧 *Выберите услугу:*\n\n_Нажмите на нужную услугу_",
             services_kb())
         return CHOOSE_SERVICE
-
+ 
     elif data == "prices":
         await send_photo_text(update, ctx, "PRICES", PRICES, back_kb())
         return MAIN_MENU
-
+ 
     elif data == "about":
         text = (
             "🏆 *О ПОНТ ДЕТЕЙЛИНГ*\n\n"
@@ -177,7 +178,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await send_photo_text(update, ctx, "ABOUT", text, back_kb())
         return MAIN_MENU
-
+ 
     elif data == "address":
         text = (
             "📍 *Наш адрес:*\n"
@@ -188,7 +189,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await send_photo_text(update, ctx, "ADDRESS", text, back_kb())
         return MAIN_MENU
-
+ 
     elif data == "contact":
         text = (
             "📞 *Связаться с мастером*\n\n"
@@ -200,7 +201,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("◀️ Назад", callback_data="back_main")],
             ]))
         return MAIN_MENU
-
+ 
     elif data.startswith("svc_"):
         idx = int(data.split("_")[1])
         ctx.user_data["service"] = SERVICES[idx]
@@ -211,7 +212,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return ENTER_NAME
-
+ 
     elif data == "confirm_yes":
         await send_to_admin(ctx)
         await send_photo_text(update, ctx, "SUCCESS",
@@ -222,28 +223,28 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Главное меню", callback_data="back_main")]]))
         ctx.user_data.clear()
         return MAIN_MENU
-
+ 
     elif data in ("confirm_edit", "confirm_cancel"):
         ctx.user_data.clear()
         return await start(update, ctx)
-
+ 
 async def get_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["name"] = update.message.text
     await update.message.reply_text("📞 Введите ваш *номер телефона:*", parse_mode="Markdown")
     return ENTER_PHONE
-
+ 
 async def get_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["phone"] = update.message.text
     await update.message.reply_text(
         "🚘 Введите *марку и модель автомобиля:*\n_Например: BMW X5_", parse_mode="Markdown")
     return ENTER_CAR
-
+ 
 async def get_car(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["car"] = update.message.text
     await update.message.reply_text(
         "💬 *Комментарий* (необязательно):\n_Или отправьте — чтобы пропустить_", parse_mode="Markdown")
     return ENTER_COMMENT
-
+ 
 async def get_comment(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     t = update.message.text
     ctx.user_data["comment"] = "—" if t.strip() == "—" else t
@@ -259,7 +260,7 @@ async def get_comment(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     await send_photo_text(update, ctx, "CONFIRM", summary, confirm_kb())
     return CONFIRM
-
+ 
 async def send_to_admin(ctx):
     d = ctx.user_data
     msg = (
@@ -271,12 +272,12 @@ async def send_to_admin(ctx):
         f"💬 Комментарий: *{d.get('comment','—')}*"
     )
     await ctx.bot.send_message(chat_id=ADMIN_CHAT_ID, text=msg, parse_mode="Markdown")
-
+ 
 async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data.clear()
     await update.message.reply_text("Отменено. Напишите /start")
     return ConversationHandler.END
-
+ 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
@@ -296,6 +297,6 @@ def main():
     app.add_handler(conv)
     print("✅ Бот ПОНТ ДЕТЕЙЛИНГ запущен!")
     app.run_polling(drop_pending_updates=True)
-
+ 
 if __name__ == "__main__":
     main()

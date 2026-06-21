@@ -14,7 +14,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
  
 # ── STATES ──
-MAIN_MENU, CHOOSE_SERVICE, ENTER_NAME, ENTER_PHONE, ENTER_CAR, ENTER_COMMENT, CONFIRM = range(7)
+MAIN_MENU, CHOOSE_SERVICE, ENTER_NAME, ENTER_PHONE, ENTER_CAR, ENTER_COMMENT, CONFIRM, BROADCAST_WAIT = range(8)
+ 
+# ── ПОДПИСЧИКИ (для рассылки) ──
+SUBSCRIBERS_FILE = "subscribers.txt"
+ 
+def load_subscribers():
+    if not os.path.exists(SUBSCRIBERS_FILE):
+        return set()
+    with open(SUBSCRIBERS_FILE, "r") as f:
+        return set(int(line.strip()) for line in f if line.strip())
+ 
+def save_subscriber(chat_id):
+    subs = load_subscribers()
+    if chat_id not in subs:
+        subs.add(chat_id)
+        with open(SUBSCRIBERS_FILE, "a") as f:
+            f.write(f"{chat_id}\n")
  
 # ── PHOTOS (file_id кешируется после первой отправки) ──
 PHOTO_CACHE = {}
@@ -140,6 +156,7 @@ def back_kb():
 # ── HANDLERS ──
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data.clear()
+    save_subscriber(update.effective_chat.id)
     text = (
         "👋 Добро пожаловать в *ПОНТ ДЕТЕЙЛИНГ*!\n\n"
         "🚗 Профессиональный уход за вашим автомобилем\n"
@@ -278,6 +295,54 @@ async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Отменено. Напишите /start")
     return ConversationHandler.END
  
+# ── РАССЫЛКА (только для админа) ──
+async def broadcast_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_chat.id) != str(ADMIN_CHAT_ID):
+        return  # игнорируем, если пишет не админ
+    subs = load_subscribers()
+    await update.message.reply_text(
+        f"📢 *Режим рассылки*\n\n"
+        f"Подписчиков в базе: *{len(subs)}*\n\n"
+        f"Отправьте сообщение (текст, фото, любой формат) — оно уйдёт всем подписчикам.\n"
+        f"Для отмены: /cancel",
+        parse_mode="Markdown"
+    )
+    return BROADCAST_WAIT
+ 
+async def broadcast_send(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_chat.id) != str(ADMIN_CHAT_ID):
+        return ConversationHandler.END
+ 
+    subs = load_subscribers()
+    sent, failed = 0, 0
+    status = await update.message.reply_text(f"⏳ Рассылка началась... 0/{len(subs)}")
+ 
+    for chat_id in subs:
+        try:
+            await update.message.copy(chat_id=chat_id)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            logger.warning(f"Broadcast failed for {chat_id}: {e}")
+ 
+        if (sent + failed) % 20 == 0:
+            try:
+                await status.edit_text(f"⏳ Рассылка идёт... {sent+failed}/{len(subs)}")
+            except:
+                pass
+ 
+    await status.edit_text(
+        f"✅ *Рассылка завершена*\n\n"
+        f"Доставлено: *{sent}*\n"
+        f"Не удалось: *{failed}*",
+        parse_mode="Markdown"
+    )
+    return ConversationHandler.END
+ 
+async def broadcast_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Рассылка отменена.")
+    return ConversationHandler.END
+ 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
@@ -295,6 +360,17 @@ def main():
         allow_reentry=True,
     )
     app.add_handler(conv)
+ 
+    broadcast_conv = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", broadcast_start)],
+        states={
+            BROADCAST_WAIT: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_send)],
+        },
+        fallbacks=[CommandHandler("cancel", broadcast_cancel)],
+        allow_reentry=True,
+    )
+    app.add_handler(broadcast_conv)
+ 
     print("✅ Бот ПОНТ ДЕТЕЙЛИНГ запущен!")
     app.run_polling(drop_pending_updates=True)
  

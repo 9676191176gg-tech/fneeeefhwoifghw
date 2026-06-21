@@ -32,6 +32,27 @@ def save_subscriber(chat_id):
         with open(SUBSCRIBERS_FILE, "a") as f:
             f.write(f"{chat_id}\n")
  
+# ── ИСТОРИЯ ЗАПИСЕЙ (личный кабинет) ──
+BOOKINGS_FILE = "bookings.txt"
+SEP = "|||"
+ 
+def save_booking(chat_id, service, name, phone, car, comment):
+    ts = __import__("datetime").datetime.now().strftime("%d.%m.%Y %H:%M")
+    line = SEP.join([str(chat_id), ts, service, name, phone, car, comment])
+    with open(BOOKINGS_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+ 
+def get_bookings_for(chat_id):
+    if not os.path.exists(BOOKINGS_FILE):
+        return []
+    result = []
+    with open(BOOKINGS_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split(SEP)
+            if len(parts) == 7 and parts[0] == str(chat_id):
+                result.append(parts)
+    return result
+ 
 # ── PHOTOS (file_id кешируется после первой отправки) ──
 PHOTO_CACHE = {}
  
@@ -83,6 +104,16 @@ async def send_photo_text(update, ctx, photo_key, text, reply_markup=None):
             await update.callback_query.delete_message()
         except:
             pass
+ 
+async def send_message_safe(update, ctx, text, reply_markup=None):
+    """Отправить обычное текстовое сообщение, удалив предыдущее (для длинных списков без фото)."""
+    chat_id = update.effective_chat.id
+    if update.callback_query:
+        try:
+            await update.callback_query.delete_message()
+        except:
+            pass
+    await ctx.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=reply_markup)
  
 # ── SERVICES ──
 SERVICES = [
@@ -136,6 +167,7 @@ def main_kb():
          InlineKeyboardButton("ℹ️ О нас", callback_data="about")],
         [InlineKeyboardButton("📍 Адрес и время работы", callback_data="address")],
         [InlineKeyboardButton("📞 Связаться с мастером", callback_data="contact")],
+        [InlineKeyboardButton("🗂 Мои записи", callback_data="my_bookings")],
     ])
  
 def services_kb():
@@ -219,6 +251,32 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]))
         return MAIN_MENU
  
+    elif data == "my_bookings":
+        bookings = get_bookings_for(update.effective_chat.id)
+        if not bookings:
+            text = (
+                "🗂 *Мои записи*\n\n"
+                "У вас пока нет истории записей.\n"
+                "Оформите первую заявку прямо сейчас!"
+            )
+        else:
+            lines = ["🗂 *Мои записи*\n"]
+            for b in reversed(bookings[-10:]):  # последние 10, новые сверху
+                _, ts, service, name, phone, car, comment = b
+                lines.append(
+                    f"📅 *{ts}*\n"
+                    f"🔧 {service}\n"
+                    f"🚘 {car}\n"
+                    f"{'─'*20}"
+                )
+            text = "\n".join(lines)
+        await send_message_safe(update, ctx, text,
+            InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Новая запись", callback_data="book")],
+                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_main")],
+            ]))
+        return MAIN_MENU
+ 
     elif data.startswith("svc_"):
         idx = int(data.split("_")[1])
         ctx.user_data["service"] = SERVICES[idx]
@@ -232,6 +290,12 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
  
     elif data == "confirm_yes":
         await send_to_admin(ctx)
+        d = ctx.user_data
+        save_booking(
+            update.effective_chat.id,
+            d.get('service','—'), d.get('name','—'), d.get('phone','—'),
+            d.get('car','—'), d.get('comment','—')
+        )
         await send_photo_text(update, ctx, "SUCCESS",
             "✅ *Заявка успешно отправлена!*\n\n"
             "Наш мастер свяжется с вами в течение часа.\n\n"
@@ -376,3 +440,4 @@ def main():
  
 if __name__ == "__main__":
     main()
+ 

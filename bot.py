@@ -1,4 +1,3 @@
-
 import logging
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
  
 # ── STATES ──
-MAIN_MENU, CHOOSE_SERVICE, ENTER_NAME, ENTER_PHONE, ENTER_CAR, ENTER_COMMENT, CONFIRM, BROADCAST_WAIT = range(8)
+MAIN_MENU, CHOOSE_SERVICE, ENTER_NAME, ENTER_PHONE, ENTER_CAR, ENTER_COMMENT, CHOOSE_DATE, CONFIRM, BROADCAST_WAIT = range(9)
  
 # ── ПОДПИСЧИКИ (для рассылки) ──
 SUBSCRIBERS_FILE = "subscribers.txt"
@@ -36,9 +35,9 @@ def save_subscriber(chat_id):
 BOOKINGS_FILE = "bookings.txt"
 SEP = "|||"
  
-def save_booking(chat_id, service, name, phone, car, comment):
+def save_booking(chat_id, service, name, phone, car, comment, visit_date):
     ts = __import__("datetime").datetime.now().strftime("%d.%m.%Y %H:%M")
-    line = SEP.join([str(chat_id), ts, service, name, phone, car, comment])
+    line = SEP.join([str(chat_id), ts, service, name, phone, car, comment, visit_date])
     with open(BOOKINGS_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
  
@@ -49,7 +48,18 @@ def get_bookings_for(chat_id):
     with open(BOOKINGS_FILE, "r", encoding="utf-8") as f:
         for line in f:
             parts = line.strip().split(SEP)
-            if len(parts) == 7 and parts[0] == str(chat_id):
+            if len(parts) == 8 and parts[0] == str(chat_id):
+                result.append(parts)
+    return result
+ 
+def get_all_bookings():
+    if not os.path.exists(BOOKINGS_FILE):
+        return []
+    result = []
+    with open(BOOKINGS_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split(SEP)
+            if len(parts) == 8:
                 result.append(parts)
     return result
  
@@ -185,6 +195,25 @@ def confirm_kb():
 def back_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Главное меню", callback_data="back_main")]])
  
+def date_kb():
+    import datetime
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    months_ru = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]
+    today = datetime.date.today()
+    buttons = []
+    row = []
+    for i in range(14):
+        d = today + datetime.timedelta(days=i)
+        label = f"{d.day} {months_ru[d.month-1]} ({days_ru[d.weekday()]})"
+        row.append(InlineKeyboardButton(label, callback_data=f"date_{d.strftime('%d.%m.%Y')}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("🤷 Уточню позже", callback_data="date_skip")])
+    return InlineKeyboardMarkup(buttons)
+ 
 # ── HANDLERS ──
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data.clear()
@@ -262,11 +291,12 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             lines = ["🗂 *Мои записи*\n"]
             for b in reversed(bookings[-10:]):  # последние 10, новые сверху
-                _, ts, service, name, phone, car, comment = b
+                _, ts, service, name, phone, car, comment, visit_date = b
                 lines.append(
-                    f"📅 *{ts}*\n"
+                    f"📅 Визит: *{visit_date}*\n"
                     f"🔧 {service}\n"
                     f"🚘 {car}\n"
+                    f"_оформлено {ts}_\n"
                     f"{'─'*20}"
                 )
             text = "\n".join(lines)
@@ -294,7 +324,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         save_booking(
             update.effective_chat.id,
             d.get('service','—'), d.get('name','—'), d.get('phone','—'),
-            d.get('car','—'), d.get('comment','—')
+            d.get('car','—'), d.get('comment','—'), d.get('visit_date','—')
         )
         await send_photo_text(update, ctx, "SUCCESS",
             "✅ *Заявка успешно отправлена!*\n\n"
@@ -329,6 +359,23 @@ async def get_car(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def get_comment(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     t = update.message.text
     ctx.user_data["comment"] = "—" if t.strip() == "—" else t
+    await update.message.reply_text(
+        "📅 *Выберите удобную дату визита:*",
+        parse_mode="Markdown",
+        reply_markup=date_kb()
+    )
+    return CHOOSE_DATE
+ 
+async def choose_date(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = q.data
+ 
+    if data == "date_skip":
+        ctx.user_data["visit_date"] = "Уточнить позже"
+    elif data.startswith("date_"):
+        ctx.user_data["visit_date"] = data.replace("date_", "")
+ 
     d = ctx.user_data
     summary = (
         "📋 *Проверьте вашу заявку:*\n\n"
@@ -336,6 +383,7 @@ async def get_comment(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"👤 Имя: *{d.get('name','—')}*\n"
         f"📞 Телефон: *{d.get('phone','—')}*\n"
         f"🚘 Авто: *{d.get('car','—')}*\n"
+        f"📅 Дата визита: *{d.get('visit_date','—')}*\n"
         f"💬 Комментарий: *{d.get('comment','—')}*\n\n"
         "Всё верно?"
     )
@@ -350,6 +398,7 @@ async def send_to_admin(ctx):
         f"👤 Имя: *{d.get('name','—')}*\n"
         f"📞 Телефон: *{d.get('phone','—')}*\n"
         f"🚘 Авто: *{d.get('car','—')}*\n"
+        f"📅 Дата визита: *{d.get('visit_date','—')}*\n"
         f"💬 Комментарий: *{d.get('comment','—')}*"
     )
     await ctx.bot.send_message(chat_id=ADMIN_CHAT_ID, text=msg, parse_mode="Markdown")
@@ -407,6 +456,50 @@ async def broadcast_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Рассылка отменена.")
     return ConversationHandler.END
  
+# ── НАПОМИНАНИЯ О ВИЗИТЕ (за день) ──
+REMINDED_FILE = "reminded.txt"
+ 
+def already_reminded(key):
+    if not os.path.exists(REMINDED_FILE):
+        return False
+    with open(REMINDED_FILE, "r") as f:
+        return key in f.read().splitlines()
+ 
+def mark_reminded(key):
+    with open(REMINDED_FILE, "a") as f:
+        f.write(key + "\n")
+ 
+async def send_reminders(ctx: ContextTypes.DEFAULT_TYPE):
+    """Запускается раз в день. Шлёт напоминание тем, у кого визит завтра."""
+    import datetime
+    tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%d.%m.%Y")
+ 
+    bookings = get_all_bookings()
+    for b in bookings:
+        chat_id, ts, service, name, phone, car, comment, visit_date = b
+        if visit_date == tomorrow:
+            key = f"{chat_id}_{visit_date}_{service}"
+            if already_reminded(key):
+                continue
+            try:
+                await ctx.bot.send_message(
+                    chat_id=int(chat_id),
+                    text=(
+                        "⏰ *Напоминание о визите*\n\n"
+                        f"Завтра, *{visit_date}*, вас ждём в ПОНТ ДЕТЕЙЛИНГ!\n\n"
+                        f"🔧 Услуга: *{service}*\n"
+                        f"🚘 Авто: *{car}*\n\n"
+                        "📍 Красноярск, Ястынская 50\n"
+                        "🕐 9:00 – 20:00\n\n"
+                        "Если планы изменились — свяжитесь с нами заранее 🙏"
+                    ),
+                    parse_mode="Markdown"
+                )
+                mark_reminded(key)
+                logger.info(f"Reminder sent to {chat_id} for {visit_date}")
+            except Exception as e:
+                logger.warning(f"Reminder failed for {chat_id}: {e}")
+ 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
@@ -418,6 +511,7 @@ def main():
             ENTER_PHONE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
             ENTER_CAR:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_car)],
             ENTER_COMMENT:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_comment)],
+            CHOOSE_DATE:    [CallbackQueryHandler(choose_date)],
             CONFIRM:        [CallbackQueryHandler(button)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -435,9 +529,12 @@ def main():
     )
     app.add_handler(broadcast_conv)
  
+    # Ежедневная проверка напоминаний о визите (в 10:00 по серверу)
+    import datetime
+    app.job_queue.run_daily(send_reminders, time=datetime.time(hour=10, minute=0))
+ 
     print("✅ Бот ПОНТ ДЕТЕЙЛИНГ запущен!")
     app.run_polling(drop_pending_updates=True)
  
 if __name__ == "__main__":
     main()
- 
